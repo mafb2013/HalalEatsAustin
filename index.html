@@ -25,6 +25,8 @@ input,select,button{font:inherit;font-size:16px;min-height:44px;border-radius:10
 button{cursor:pointer;font-weight:600}
 button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.zip{display:flex;gap:6px;flex:1 1 260px}
+.zip input{flex:1 1 140px;width:100%}
 label.chk{display:flex;align-items:center;gap:8px;min-height:44px;font-size:15px;cursor:pointer}
 label.chk input{width:20px;height:20px;min-height:0;flex:none}
 main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);height:calc(100vh - 170px);min-height:520px}
@@ -47,7 +49,7 @@ footer a{color:inherit}
 <body>
 <header>
   <h1>Halal Eats Austin</h1>
-  <p class="by">Brought to you by <strong>Mohamed Ali</strong> · <em>“Appram enna adi dhool”</em></p>
+  <p class="by">Brought to you by <strong>Mohamed Ali</strong> · <em>“Appram enna adi poli”</em></p>
   <p>Halal restaurants across Austin, Round Rock, Pflugerville and Cedar Park — addresses, directions and reviews.</p>
 </header>
 
@@ -61,7 +63,11 @@ footer a{color:inherit}
     <option value="dist">Nearest first</option>
   </select>
   <label class="chk"><input type="checkbox" id="full"> Fully halal only</label>
-  <button id="near" class="primary">Use my location</button>
+  <form id="zipf" class="zip">
+    <input id="zip" inputmode="text" autocomplete="postal-code" placeholder="ZIP code or address" aria-label="ZIP code or address">
+    <button type="submit">Find nearby</button>
+  </form>
+  <button id="near" class="primary" type="button">Use my location</button>
 </div>
 
 <main>
@@ -76,7 +82,7 @@ footer a{color:inherit}
   Restaurant list compiled from the <a href="https://www.zabihah.com/halal-restaurants/austin-tx-us" target="_blank" rel="noopener">Zabihah</a> community directory (Nov 2026). Reviews open on Google Maps.
   Halal standards vary (zabiha, machine-slaughtered, halal options only) — please confirm with the restaurant.
   Map © OpenStreetMap contributors © CARTO.<br>
-  Halal Eats Austin — brought to you by Mohamed Ali. “Appram enna adi dhool”
+  Halal Eats Austin — brought to you by Mohamed Ali. “Appram enna adi poli”
 </footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -108,7 +114,7 @@ footer a{color:inherit}
     layer = L.layerGroup().addTo(map);
   } catch (e) { $('map').textContent = 'Map could not load — the list still works.'; }
 
-  let origin = null, youMarker = null;
+  let origin = null, originLabel = '', youMarker = null;
 
   function miles(a, b) {
     const R = 3958.8, r = x => x * Math.PI / 180;
@@ -122,7 +128,7 @@ footer a{color:inherit}
   const dirUrl = p => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.address)}`;
 
   function card(p) {
-    const dist = (origin && p.lat != null) ? ` · ${miles(origin, p).toFixed(1)} mi away` : '';
+    const dist = (origin && p.lat != null) ? ` · ${miles(origin, p).toFixed(1)} mi from ${originLabel === 'You are here' ? 'you' : originLabel}` : '';
     const tags = (p.full ? '<span class="tag ok">Fully halal</span>' : '') +
       p.cuisine.split(',').map(c => `<span class="tag">${esc(c.trim())}</span>`).join('');
     return `<h3>${esc(p.name)}</h3>
@@ -148,6 +154,7 @@ footer a{color:inherit}
     const list = filtered();
     $('status').textContent = `${list.length} halal place${list.length === 1 ? '' : 's'}` +
       ($('city').value ? ` in ${$('city').value}` : ' in the Austin area') +
+      (origin ? `, nearest to ${originLabel === 'You are here' ? 'you' : originLabel} first` : '') +
       (geoPending ? ` · placing pins on map (${geoDone}/${places.length})…` : '');
     $('list').innerHTML = list.length ? list.map(p => `<div class="place" tabindex="0" data-id="${p.id}">${card(p)}</div>`).join('')
       : '<div class="place">No matches — try another word or area.</div>';
@@ -218,23 +225,63 @@ footer a{color:inherit}
 
   ['q', 'city', 'sort', 'full'].forEach(id => $(id).addEventListener(id === 'q' ? 'input' : 'change', render));
 
+  function setOrigin(o, label, zoom) {
+    origin = o; originLabel = label;
+    if (map) {
+      youMarker?.remove();
+      youMarker = L.circleMarker([o.lat, o.lon], {radius: 9, color: '#fff', weight: 3, fillColor: '#e0a526', fillOpacity: 1})
+        .bindTooltip(label).addTo(map);
+      map.setView([o.lat, o.lon], zoom);
+    }
+    $('sort').value = 'dist';
+    $('city').value = '';
+    render();
+    $('side').scrollTop = 0;
+  }
+
+  async function findPlace(text) {
+    const t = text.trim();
+    const isZip = /^\d{5}$/.test(t);
+    const urls = isZip
+      ? [`https://nominatim.openstreetmap.org/search?format=json&limit=1&country=us&postalcode=${t}`,
+         `https://photon.komoot.io/api/?limit=1&q=${t}%20Texas%20USA`]
+      : [`https://photon.komoot.io/api/?limit=1&lat=30.27&lon=-97.74&q=${encodeURIComponent(t)}`,
+         `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(t + (/tx|texas/i.test(t) ? '' : ', TX'))}`];
+    for (const url of urls) {
+      try {
+        const r = await fetch(url); if (!r.ok) continue;
+        const j = await r.json();
+        if (j.features?.[0]) { const [lon, lat] = j.features[0].geometry.coordinates; return {lat, lon}; }
+        if (j[0]) return {lat: +j[0].lat, lon: +j[0].lon};
+      } catch {}
+    }
+    return null;
+  }
+
+  $('zipf').addEventListener('submit', async e => {
+    e.preventDefault();
+    const t = $('zip').value.trim();
+    if (!t) { $('zip').focus(); return; }
+    const btn = $('zipf').querySelector('button');
+    btn.textContent = 'Searching…'; btn.disabled = true;
+    const o = await findPlace(t);
+    btn.textContent = 'Find nearby'; btn.disabled = false;
+    if (!o) { $('status').textContent = `Couldn't find “${t}”. Try a 5-digit ZIP code like 78753.`; return; }
+    try { localStorage.setItem('halal-austin-zip', t); } catch {}
+    setOrigin(o, /^\d{5}$/.test(t) ? 'ZIP ' + t : t, 13);
+  });
+  try { const z = localStorage.getItem('halal-austin-zip'); if (z) $('zip').value = z; } catch {}
+
   $('near').addEventListener('click', () => {
-    if (!navigator.geolocation) { $('status').textContent = 'Location is not available in this browser.'; return; }
+    if (!navigator.geolocation) { $('status').textContent = 'Location is not available — type your ZIP code instead.'; $('zip').focus(); return; }
     $('near').textContent = 'Locating…';
     navigator.geolocation.getCurrentPosition(pos => {
-      origin = {lat: pos.coords.latitude, lon: pos.coords.longitude};
-      if (map) {
-        youMarker?.remove();
-        youMarker = L.circleMarker([origin.lat, origin.lon], {radius: 9, color: '#fff', weight: 3, fillColor: '#e0a526', fillOpacity: 1})
-          .bindTooltip('You are here').addTo(map);
-        map.setView([origin.lat, origin.lon], 12);
-      }
-      $('sort').value = 'dist';
       $('near').textContent = 'Use my location';
-      render();
+      setOrigin({lat: pos.coords.latitude, lon: pos.coords.longitude}, 'You are here', 12);
     }, () => {
       $('near').textContent = 'Use my location';
-      $('status').textContent = 'Location permission was denied. You can still search by area.';
+      $('status').textContent = 'Location is turned off — type your ZIP code instead and press Find nearby.';
+      $('zip').focus();
     }, {timeout: 10000});
   });
 
