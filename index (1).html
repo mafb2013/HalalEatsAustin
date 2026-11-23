@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halal Eats Austin</title>
+<meta name="description" content="Find halal restaurants in Austin, Texas — map, addresses, directions and reviews. Free for everyone.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{color-scheme:light dark;
+  --bg:light-dark(#fbfaf6,#0e1716);--card:light-dark(#ffffff,#16211f);
+  --ink:light-dark(#14201e,#eef3f1);--muted:light-dark(#5b6966,#9fb1ad);
+  --line:light-dark(#e3e6e1,#25332f);--brand:#0b5c55;--accent:#e0a526;--accent-ink:#2a1d00}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Inter,system-ui,sans-serif}
+header{background:var(--brand);color:#fff;padding:22px max(4vw,16px) 18px}
+h1{font:600 clamp(28px,4vw,40px)/1.05 Fraunces,Georgia,serif;margin:0 0 4px}
+header p{margin:0;opacity:.85}
+header p.by{opacity:1;color:var(--accent);font-size:17px;margin:2px 0 6px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;padding:14px max(4vw,16px);border-bottom:1px solid var(--line);align-items:center}
+input,select,button{font:inherit;font-size:16px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:0 12px}
+#q{flex:1 1 220px}
+button{cursor:pointer;font-weight:600}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+label.chk{display:flex;align-items:center;gap:8px;min-height:44px;font-size:15px;cursor:pointer}
+label.chk input{width:20px;height:20px;min-height:0;flex:none}
+main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);height:calc(100vh - 170px);min-height:520px}
+#map{height:100%;z-index:0;background:light-dark(#e8ece9,#1a2422)}
+#side{overflow-y:auto;border-left:1px solid var(--line)}
+#status{padding:12px 16px;color:var(--muted);font-size:14px;border-bottom:1px solid var(--line)}
+.place{padding:14px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.place:hover,.place.on{background:light-dark(#f2f6f4,#1b2826)}
+.place h3{margin:0 0 2px;font-size:17px}
+.meta{color:var(--muted);font-size:14px}
+.tag{display:inline-block;font-size:13px;padding:1px 8px;border-radius:99px;background:light-dark(#e6f1ef,#1f3532);color:light-dark(#0b5c55,#8fd3c9);margin:4px 4px 0 0}
+.tag.ok{background:#0b5c55;color:#fff}
+.links{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:14px}
+.links a{color:light-dark(#0b5c55,#7fd0c4);font-weight:600}
+footer{padding:16px max(4vw,16px);font-size:13px;color:var(--muted)}
+footer a{color:inherit}
+@media(max-width:760px){main{grid-template-columns:1fr;height:auto}#map{height:45vh}#side{border-left:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Halal Eats Austin</h1>
+  <p class="by">Brought to you by <strong>Mohamed Ali</strong> · <em>“Appram enna adi dhool”</em></p>
+  <p>Halal restaurants across Austin, Round Rock, Pflugerville and Cedar Park — addresses, directions and reviews.</p>
+</header>
+
+<div class="bar">
+  <input id="q" type="search" placeholder="Search name, food or area (e.g. biryani, shawarma, Round Rock)" aria-label="Search restaurants">
+  <select id="city" aria-label="Area">
+    <option value="">All areas</option>
+  </select>
+  <select id="sort" aria-label="Sort">
+    <option value="name">A–Z</option>
+    <option value="dist">Nearest first</option>
+  </select>
+  <label class="chk"><input type="checkbox" id="full"> Fully halal only</label>
+  <button id="near" class="primary">Use my location</button>
+</div>
+
+<main>
+  <div id="map" role="region" aria-label="Map of halal restaurants"></div>
+  <div id="side">
+    <div id="status"></div>
+    <div id="list"></div>
+  </div>
+</main>
+
+<footer>
+  Restaurant list compiled from the <a href="https://www.zabihah.com/halal-restaurants/austin-tx-us" target="_blank" rel="noopener">Zabihah</a> community directory (Nov 2026). Reviews open on Google Maps.
+  Halal standards vary (zabiha, machine-slaughtered, halal options only) — please confirm with the restaurant.
+  Map © OpenStreetMap contributors © CARTO.<br>
+  Halal Eats Austin — brought to you by Mohamed Ali. “Appram enna adi dhool”
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+{
+  // n = name, a = address, c = cuisine, f = 1 if listed as fully halal
+  const DATA = [{"n": "Kababeque", "a": "9313 Anderson Mill Road, Austin, TX", "c": "Mediterranean", "f": 1}, {"n": "Kababeque (Rainey St)", "a": "75 Rainey Street, Austin, TX", "c": "Fusion, Indian, Mediterranean", "f": 1}, {"n": "Halal Bros (UT Campus)", "a": "2712 Guadalupe Street, Austin, TX", "c": "American, Middle Eastern", "f": 1}, {"n": "Halal Bros (Braker)", "a": "1910 West Braker Lane, Austin, TX", "c": "Middle Eastern", "f": 1}, {"n": "Halal Bros (620)", "a": "11521 North FM 620, Austin, TX", "c": "Middle Eastern", "f": 1}, {"n": "Halal Bros (Round Rock)", "a": "3107 S Interstate 35 Ste 775, Round Rock, TX", "c": "Middle Eastern", "f": 1}, {"n": "Austins Habibi", "a": "817 West 5th Street, Austin, TX", "c": "Mediterranean, Middle Eastern", "f": 1}, {"n": "Lucky Halal", "a": "1130 Airport Blvd, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Al Saadi Halal", "a": "717 East 7th Street, Austin, TX", "c": "Middle Eastern", "f": 0}, {"n": "Halal Taza", "a": "2601 West Braker Lane, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Atia's Kitchen", "a": "7800 South 1st Street, Austin, TX", "c": "Pakistani", "f": 1}, {"n": "Fresh Gyro Halal", "a": "85 Rainey Street, Austin, TX", "c": "Middle Eastern", "f": 1}, {"n": "The Halal Gurus", "a": "539 West Oltorf Street, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Halal Hub (Oltorf)", "a": "539 West Oltorf Street, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Halal Hub (Pflugerville)", "a": "2800 South Heatherwilde Boulevard, Pflugerville, TX", "c": "American, Middle Eastern", "f": 0}, {"n": "Troy", "a": "8105 Mesa Drive, Austin, TX", "c": "Turkish", "f": 0}, {"n": "Biryani Pot", "a": "12407 North Mopac Expressway, Austin, TX", "c": "Hyderabadi, Indian, Pakistani", "f": 0}, {"n": "Taste from India", "a": "519 East 7th Street, Austin, TX", "c": "Indian", "f": 0}, {"n": "The Urban Turban", "a": "4257 Gattis School Road, Round Rock, TX", "c": "Pakistani, Fusion, Mexican", "f": 1}, {"n": "Clay Pit", "a": "1601 Guadalupe Street, Austin, TX", "c": "Indian", "f": 0}, {"n": "Rock N Grill", "a": "1702 North Mays Street, Round Rock, TX", "c": "Indian", "f": 0}, {"n": "Promise Pizza", "a": "1500 South AW Grimes Blvd, Round Rock, TX", "c": "Italian, Pizza", "f": 0}, {"n": "Bayleaf", "a": "3200 Greenlawn Blvd, Round Rock, TX", "c": "Indian", "f": 0}, {"n": "Aladdin Halal Grill", "a": "2051 Gattis School Road, Round Rock, TX", "c": "Mediterranean", "f": 0}, {"n": "Spice Garden", "a": "3107 South I-35 Frontage Road, Round Rock, TX", "c": "Indian, Indo-Chinese", "f": 0}, {"n": "Kismet Café", "a": "1000 East 41st Street, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Saffron Indian Fusion", "a": "3616 Far West Blvd, Austin, TX", "c": "Indian, Nepali", "f": 0}, {"n": "MezzeMe Turkish Kitchen", "a": "4700 West Guadalupe Street, Austin, TX", "c": "Turkish, Mediterranean", "f": 0}, {"n": "Tarka Indian Kitchen", "a": "2525 West Anderson Lane, Austin, TX", "c": "Indian", "f": 0}, {"n": "Roya", "a": "7858 Shoal Creek Boulevard, Austin, TX", "c": "Persian", "f": 0}, {"n": "Arpeggio Grill", "a": "6619 Airport Blvd, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Old Jerusalem", "a": "3808 Spicewood Springs Road, Austin, TX", "c": "Palestinian, Middle Eastern", "f": 0}, {"n": "Hadramout", "a": "5610 North Interstate Highway 35, Austin, TX", "c": "Yemeni, Mediterranean", "f": 0}, {"n": "Wing Master", "a": "5610 North Interstate 35, Austin, TX", "c": "American, Wings", "f": 0}, {"n": "Gyro Fusion", "a": "5610 North Interstate 35, Austin, TX", "c": "Greek, Mediterranean", "f": 0}, {"n": "Phoenician Resto Café (Guadalupe)", "a": "2909 Guadalupe Street, Austin, TX", "c": "Lebanese, Mediterranean", "f": 0}, {"n": "Phoenician Resto-Café (I-35)", "a": "84 North Interstate 35 Frontage Road, Austin, TX", "c": "Lebanese, Mediterranean", "f": 0}, {"n": "Yalla Burgers & Wings", "a": "2908 Fruth Street, Austin, TX", "c": "American, Burgers", "f": 0}, {"n": "Abu Omar Halal (Guadalupe)", "a": "2825 Guadalupe Street, Austin, TX", "c": "American, Middle Eastern", "f": 0}, {"n": "Abu Omar Halal (Lake Creek)", "a": "9916 Lake Creek Pkwy, Austin, TX", "c": "American, Middle Eastern", "f": 0}, {"n": "Al Shami", "a": "2718 Guadalupe Street, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Mighty Mo's", "a": "2716 Guadalupe Street, Austin, TX", "c": "American, Canadian", "f": 0}, {"n": "The Kebab Shop", "a": "1201 Barbara Jordan Blvd, Austin, TX", "c": "Turkish, Middle Eastern", "f": 0}, {"n": "Shawarma King", "a": "3211 Red River Street, Austin, TX", "c": "Middle Eastern, Mexican", "f": 0}, {"n": "Peace Bakery & Deli", "a": "11220 North Lamar Blvd, Austin, TX", "c": "Lebanese, Palestinian", "f": 0}, {"n": "Zaviya Grill", "a": "1212 West Parmer Lane, Austin, TX", "c": "Pakistani, Indian", "f": 0}, {"n": "Spice Fine Indian Cuisine", "a": "500 West Canyon Ridge Drive, Austin, TX", "c": "Indian", "f": 0}, {"n": "Almarah Mediterranean Grill", "a": "12129 Ranch Road 620 North, Austin, TX", "c": "Mediterranean", "f": 0}, {"n": "Smashed N Sauced", "a": "12129 Ranch Road 620 North, Austin, TX", "c": "American, Burgers", "f": 0}, {"n": "Peri Peri Republic", "a": "11200 Lakeline Mall Drive, Austin, TX", "c": "Portuguese, South African", "f": 0}, {"n": "SuyaVerse Grillhouse", "a": "12601 Tech Ridge Boulevard, Austin, TX", "c": "Nigerian, American", "f": 0}, {"n": "Haraz Coffee House (MLK)", "a": "500 West Martin Luther King Jr Blvd, Austin, TX", "c": "Yemeni, Coffee", "f": 0}, {"n": "Haraz Coffee House (Pflugerville)", "a": "801 Wells Branch Parkway, Pflugerville, TX", "c": "Yemeni, Coffee", "f": 0}, {"n": "Usta Kababgy (N Lamar)", "a": "9310 North Lamar Blvd, Austin, TX", "c": "Mediterranean, BBQ", "f": 0}, {"n": "Usta Kababgy (Round Rock)", "a": "1400 East Old Settlers Blvd, Round Rock, TX", "c": "Mediterranean, BBQ", "f": 0}, {"n": "Mirchi Grill", "a": "2301 South Lakeline Blvd, Cedar Park, TX", "c": "Indian, Pakistani", "f": 0}, {"n": "Sangam Chettinad", "a": "6001 West Parmer Lane, Austin, TX", "c": "Indian", "f": 0}, {"n": "KG BBQ", "a": "3108 Manor Rd, Austin, TX", "c": "Egyptian, BBQ", "f": 0}, {"n": "Muse Café", "a": "1335 East Whitestone Boulevard, Cedar Park, TX", "c": "Middle Eastern, American", "f": 0}, {"n": "The Indian Flames", "a": "8905 Circle Drive, Austin, TX", "c": "Indian", "f": 0}, {"n": "MOOD Sweets", "a": "851 South Bell Blvd, Cedar Park, TX", "c": "Desserts, Middle Eastern", "f": 0}, {"n": "Dum N Grill", "a": "13945 North Hwy 183, Austin, TX", "c": "Pakistani, Indian", "f": 0}, {"n": "Country Bird", "a": "1418 Barton Springs Road, Austin, TX", "c": "Fusion, Indian", "f": 0}, {"n": "Injera & Beyond", "a": "410 West Whitestone Boulevard, Cedar Park, TX", "c": "Ethiopian", "f": 0}, {"n": "Ehab Mediterranean Buffet", "a": "12636 Research Boulevard, Austin, TX", "c": "Mediterranean, Middle Eastern", "f": 0}, {"n": "Dimassi's Mediterranean Buffet", "a": "701 East Stassney Lane, Austin, TX", "c": "Lebanese, Mediterranean", "f": 0}, {"n": "Diwan", "a": "11800 North Lamar Blvd, Austin, TX", "c": "Iraqi, Middle Eastern", "f": 0}, {"n": "Shandeez Grill", "a": "8863 Anderson Mill Road, Austin, TX", "c": "Persian", "f": 0}, {"n": "Arwa Yemeni Coffee", "a": "12301 West Parmer Lane, Cedar Park, TX", "c": "Yemeni, Coffee", "f": 0}];
+
+  const AUSTIN = {lat: 30.2672, lon: -97.7431};
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const cityOf = a => a.split(',').slice(-2, -1)[0].trim();
+
+  const places = DATA.map((d, i) => ({id: i, name: d.n, address: d.a, cuisine: d.c, full: !!d.f, city: cityOf(d.a), lat: null, lon: null}));
+
+  // Area dropdown
+  [...new Set(places.map(p => p.city))].sort().forEach(c => {
+    const o = document.createElement('option'); o.value = c; o.textContent = c; $('city').appendChild(o);
+  });
+
+  // ---- Map (works even if tiles are blocked; list never depends on it)
+  let map = null, layer = null, markers = {};
+  try {
+    map = L.map('map').setView([AUSTIN.lat, AUSTIN.lon], 11);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 20, subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+    layer = L.layerGroup().addTo(map);
+  } catch (e) { $('map').textContent = 'Map could not load — the list still works.'; }
+
+  let origin = null, youMarker = null;
+
+  function miles(a, b) {
+    const R = 3958.8, r = x => x * Math.PI / 180;
+    const dLat = r(b.lat - a.lat), dLon = r(b.lon - a.lon);
+    const h = Math.sin(dLat/2)**2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLon/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  const gq = p => encodeURIComponent(`${p.name.replace(/\s*\(.*\)$/, '')} ${p.address}`);
+  const reviewsUrl = p => `https://www.google.com/maps/search/?api=1&query=${gq(p)}`;
+  const dirUrl = p => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.address)}`;
+
+  function card(p) {
+    const dist = (origin && p.lat != null) ? ` · ${miles(origin, p).toFixed(1)} mi away` : '';
+    const tags = (p.full ? '<span class="tag ok">Fully halal</span>' : '') +
+      p.cuisine.split(',').map(c => `<span class="tag">${esc(c.trim())}</span>`).join('');
+    return `<h3>${esc(p.name)}</h3>
+      <div class="meta">${esc(p.address)}${esc(dist)}</div>
+      <div>${tags}</div>
+      <div class="links">
+        <a href="${reviewsUrl(p)}" target="_blank" rel="noopener">★ Reviews &amp; photos</a>
+        <a href="${dirUrl(p)}" target="_blank" rel="noopener">Directions</a>
+      </div>`;
+  }
+
+  function filtered() {
+    const q = $('q').value.trim().toLowerCase(), city = $('city').value, full = $('full').checked;
+    let list = places.filter(p => (!city || p.city === city) && (!full || p.full) &&
+      (!q || (p.name + ' ' + p.cuisine + ' ' + p.address).toLowerCase().includes(q)));
+    if ($('sort').value === 'dist' && origin) {
+      list.sort((a, b) => (a.lat == null) - (b.lat == null) || (a.lat == null ? 0 : miles(origin, a) - miles(origin, b)));
+    } else list.sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }
+
+  function render() {
+    const list = filtered();
+    $('status').textContent = `${list.length} halal place${list.length === 1 ? '' : 's'}` +
+      ($('city').value ? ` in ${$('city').value}` : ' in the Austin area') +
+      (geoPending ? ` · placing pins on map (${geoDone}/${places.length})…` : '');
+    $('list').innerHTML = list.length ? list.map(p => `<div class="place" tabindex="0" data-id="${p.id}">${card(p)}</div>`).join('')
+      : '<div class="place">No matches — try another word or area.</div>';
+
+    if (layer) {
+      layer.clearLayers(); markers = {};
+      list.filter(p => p.lat != null).forEach(p => {
+        markers[p.id] = L.marker([p.lat, p.lon]).bindPopup(card(p), {maxWidth: 280}).addTo(layer);
+      });
+    }
+  }
+
+  $('list').addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    const div = e.target.closest('.place[data-id]'); if (!div) return;
+    const p = places[+div.dataset.id];
+    $('list').querySelectorAll('.on').forEach(x => x.classList.remove('on'));
+    div.classList.add('on');
+    if (map && p.lat != null) {
+      map.setView([p.lat, p.lon], 16);
+      markers[p.id]?.openPopup();
+      if (window.innerWidth <= 760) $('map').scrollIntoView({behavior: 'smooth'});
+    }
+  });
+  $('list').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.click(); });
+
+  // ---- Geocode addresses for map pins (free, no key). Cached in the browser.
+  const CACHE = 'halal-austin-geo-v1';
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem(CACHE) || '{}'); } catch {}
+  let geoDone = 0, geoPending = true;
+
+  async function geocode(addr) {
+    const tries = [
+      `https://photon.komoot.io/api/?limit=1&lat=30.27&lon=-97.74&q=${encodeURIComponent(addr)}`,
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(addr)}`
+    ];
+    for (const url of tries) {
+      try {
+        const r = await fetch(url); if (!r.ok) continue;
+        const j = await r.json();
+        if (j.features?.[0]) { const [lon, lat] = j.features[0].geometry.coordinates; return {lat, lon}; }
+        if (j[0]) return {lat: +j[0].lat, lon: +j[0].lon};
+      } catch {}
+    }
+    return null;
+  }
+
+  async function placePins() {
+    let last = 0;
+    for (const p of places) {
+      let g = cache[p.address];
+      if (!g) {
+        g = await geocode(p.address);
+        if (g && Math.abs(g.lat - AUSTIN.lat) < 1 && Math.abs(g.lon - AUSTIN.lon) < 1) {
+          cache[p.address] = g;
+          try { localStorage.setItem(CACHE, JSON.stringify(cache)); } catch {}
+        } else g = null;
+        await new Promise(r => setTimeout(r, 350));
+      }
+      if (g) { p.lat = g.lat; p.lon = g.lon; }
+      geoDone++;
+      if (Date.now() - last > 1500) { render(); last = Date.now(); }
+    }
+    geoPending = false;
+    render();
+  }
+
+  ['q', 'city', 'sort', 'full'].forEach(id => $(id).addEventListener(id === 'q' ? 'input' : 'change', render));
+
+  $('near').addEventListener('click', () => {
+    if (!navigator.geolocation) { $('status').textContent = 'Location is not available in this browser.'; return; }
+    $('near').textContent = 'Locating…';
+    navigator.geolocation.getCurrentPosition(pos => {
+      origin = {lat: pos.coords.latitude, lon: pos.coords.longitude};
+      if (map) {
+        youMarker?.remove();
+        youMarker = L.circleMarker([origin.lat, origin.lon], {radius: 9, color: '#fff', weight: 3, fillColor: '#e0a526', fillOpacity: 1})
+          .bindTooltip('You are here').addTo(map);
+        map.setView([origin.lat, origin.lon], 12);
+      }
+      $('sort').value = 'dist';
+      $('near').textContent = 'Use my location';
+      render();
+    }, () => {
+      $('near').textContent = 'Use my location';
+      $('status').textContent = 'Location permission was denied. You can still search by area.';
+    }, {timeout: 10000});
+  });
+
+  render();
+  placePins();
+}
+</script>
+</body>
+</html>
