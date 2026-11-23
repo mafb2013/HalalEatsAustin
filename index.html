@@ -107,10 +107,19 @@ footer a{color:inherit}
   let map = null, layer = null, markers = {};
   try {
     map = L.map('map').setView([AUSTIN.lat, AUSTIN.lon], 11);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 20, subdomains: 'abcd',
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    // OpenStreetMap tiles; if they fail (e.g. opened as a local file), switch to Esri's free street map
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
+    let tileErrors = 0;
+    osm.on('tileerror', () => {
+      if (++tileErrors === 4) {
+        map.removeLayer(osm);
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+          maxZoom: 19, attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+      }
+    });
     layer = L.layerGroup().addTo(map);
   } catch (e) { $('map').textContent = 'Map could not load — the list still works.'; }
 
@@ -182,24 +191,44 @@ footer a{color:inherit}
   $('list').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.click(); });
 
   // ---- Geocode addresses for map pins (free, no key). Cached in the browser.
-  const CACHE = 'halal-austin-geo-v1';
+  const CACHE = 'halal-austin-geo-v2';
+  try { localStorage.removeItem('halal-austin-geo-v1'); } catch {}
   let cache = {};
   try { cache = JSON.parse(localStorage.getItem(CACHE) || '{}'); } catch {}
   let geoDone = 0, geoPending = true;
 
+  // JSONP helper (the US Census geocoder doesn't allow normal cross-site requests)
+  function jsonp(url, ms = 10000) {
+    return new Promise((resolve, reject) => {
+      const cb = 'cb_' + Math.random().toString(36).slice(2);
+      const sc = document.createElement('script');
+      const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, ms);
+      function done() { clearTimeout(timer); delete window[cb]; sc.remove(); }
+      window[cb] = data => { done(); resolve(data); };
+      sc.onerror = () => { done(); reject(new Error('failed')); };
+      sc.src = url + '&callback=' + cb;
+      document.head.appendChild(sc);
+    });
+  }
+
+  // Exact street-address lookup. Rejects results that only match the street, not the building.
   async function geocode(addr) {
-    const tries = [
-      `https://photon.komoot.io/api/?limit=1&lat=30.27&lon=-97.74&q=${encodeURIComponent(addr)}`,
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(addr)}`
-    ];
-    for (const url of tries) {
-      try {
-        const r = await fetch(url); if (!r.ok) continue;
-        const j = await r.json();
-        if (j.features?.[0]) { const [lon, lat] = j.features[0].geometry.coordinates; return {lat, lon}; }
-        if (j[0]) return {lat: +j[0].lat, lon: +j[0].lon};
-      } catch {}
-    }
+    try {
+      const d = await jsonp('https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=jsonp&address=' + encodeURIComponent(addr));
+      const m = d?.result?.addressMatches?.[0];
+      if (m) return {lat: m.coordinates.y, lon: m.coordinates.x};
+    } catch {}
+    const num = (addr.match(/^\s*(\d+)/) || [])[1];
+    try {
+      const r = await fetch(`https://photon.komoot.io/api/?limit=1&lat=30.4&lon=-97.74&q=${encodeURIComponent(addr)}`);
+      const f = (await r.json()).features?.[0];
+      if (f && (!num || f.properties?.housenumber === num)) { const [lon, lat] = f.geometry.coordinates; return {lat, lon}; }
+    } catch {}
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&countrycodes=us&q=${encodeURIComponent(addr)}`);
+      const j = (await r.json())[0];
+      if (j && (!num || j.address?.house_number === num)) return {lat: +j.lat, lon: +j.lon};
+    } catch {}
     return null;
   }
 
@@ -213,7 +242,7 @@ footer a{color:inherit}
           cache[p.address] = g;
           try { localStorage.setItem(CACHE, JSON.stringify(cache)); } catch {}
         } else g = null;
-        await new Promise(r => setTimeout(r, 350));
+        await new Promise(r => setTimeout(r, 150));
       }
       if (g) { p.lat = g.lat; p.lon = g.lon; }
       geoDone++;
@@ -242,10 +271,19 @@ footer a{color:inherit}
   async function findPlace(text) {
     const t = text.trim();
     const isZip = /^\d{5}$/.test(t);
-    const urls = isZip
-      ? [`https://nominatim.openstreetmap.org/search?format=json&limit=1&country=us&postalcode=${t}`,
-         `https://photon.komoot.io/api/?limit=1&q=${t}%20Texas%20USA`]
-      : [`https://photon.komoot.io/api/?limit=1&lat=30.27&lon=-97.74&q=${encodeURIComponent(t)}`,
+    if (isZip) {
+      try {
+        const r = await fetch(`https://api.zippopotam.us/us/${t}`);
+        if (r.ok) { const pl = (await r.json()).places?.[0]; if (pl) return {lat: +pl.latitude, lon: +pl.longitude}; }
+      } catch {}
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&country=us&postalcode=${t}`);
+        const j = (await r.json())[0]; if (j) return {lat: +j.lat, lon: +j.lon};
+      } catch {}
+      return null;
+    }
+    if (/^\d+\s/.test(t)) { const g = await geocode(/tx|texas/i.test(t) ? t : t + ', TX'); if (g) return g; }
+    const urls = [`https://photon.komoot.io/api/?limit=1&lat=30.27&lon=-97.74&q=${encodeURIComponent(t)}`,
          `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(t + (/tx|texas/i.test(t) ? '' : ', TX'))}`];
     for (const url of urls) {
       try {
