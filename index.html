@@ -137,7 +137,9 @@ footer a{color:inherit}
   const dirUrl = p => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.address)}`;
 
   function card(p) {
-    const dist = (origin && p.lat != null) ? ` · ${miles(origin, p).toFixed(1)} mi from ${originLabel === 'You are here' ? 'you' : originLabel}` : '';
+    const dist = !origin ? '' : p.lat != null
+      ? ` · ${miles(origin, p).toFixed(1)} mi from ${originLabel === 'You are here' ? 'you' : originLabel}`
+      : (geoPending ? ' · finding distance…' : ' · distance not available — tap Directions');
     const tags = (p.full ? '<span class="tag ok">Fully halal</span>' : '') +
       p.cuisine.split(',').map(c => `<span class="tag">${esc(c.trim())}</span>`).join('');
     return `<h3>${esc(p.name)}</h3>
@@ -212,12 +214,33 @@ footer a{color:inherit}
   }
 
   // Exact street-address lookup. Rejects results that only match the street, not the building.
+  // Highway addresses are written many ways; try the spellings the Census database uses.
+  const ZIPS = {'11521 North FM 620': '78726', '12129 Ranch Road 620 North': '78750', '12407 North Mopac Expressway': '78758',
+    '13945 North Hwy 183': '78717', '5610 North Interstate': '78751', '84 North Interstate 35': '78701', '3107 S': '78664'};
+  function variants(addr) {
+    const out = [addr];
+    let n = addr
+      .replace(/\s+(Ste|Suite|#)\.?\s*[\w-]+/i, '')
+      .replace(/\s*Frontage Road/i, '')
+      .replace(/Interstate Highway 35|I-35/i, 'Interstate 35')
+      .replace(/Ranch Road 620 North|North FM 620|North Farm[- ]to[- ]Market 620/i, 'N FM 620')
+      .replace(/North Hwy 183/i, 'N US Highway 183')
+      .replace(/North Mopac Expressway/i, 'N Mopac Expy')
+      .replace(/\bNorth\b/g, 'N').replace(/\bSouth\b/g, 'S').replace(/\bEast\b/g, 'E').replace(/\bWest\b/g, 'W');
+    if (n !== addr) out.push(n);
+    const zk = Object.keys(ZIPS).find(k => addr.startsWith(k));
+    if (zk) out.push(n + ' ' + ZIPS[zk], n.replace(/N FM 620/, 'N FM 620 Rd') + ' ' + ZIPS[zk]);
+    return [...new Set(out)];
+  }
+
   async function geocode(addr) {
-    try {
-      const d = await jsonp('https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=jsonp&address=' + encodeURIComponent(addr));
-      const m = d?.result?.addressMatches?.[0];
-      if (m) return {lat: m.coordinates.y, lon: m.coordinates.x};
-    } catch {}
+    for (const v of variants(addr)) {
+      try {
+        const d = await jsonp('https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=jsonp&address=' + encodeURIComponent(v));
+        const m = d?.result?.addressMatches?.[0];
+        if (m) return {lat: m.coordinates.y, lon: m.coordinates.x};
+      } catch {}
+    }
     const num = (addr.match(/^\s*(\d+)/) || [])[1];
     try {
       const r = await fetch(`https://photon.komoot.io/api/?limit=1&lat=30.4&lon=-97.74&q=${encodeURIComponent(addr)}`);
