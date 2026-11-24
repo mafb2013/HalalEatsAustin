@@ -64,7 +64,7 @@ footer a{color:inherit}
   </select>
   <label class="chk"><input type="checkbox" id="full"> Fully halal only</label>
   <form id="zipf" class="zip">
-    <input id="zip" inputmode="text" autocomplete="postal-code" placeholder="ZIP code or address" aria-label="ZIP code or address">
+    <input id="zip" inputmode="text" autocomplete="postal-code" placeholder="ZIP code or street address" aria-label="ZIP code or address">
     <button type="submit">Find nearby</button>
   </form>
   <button id="near" class="primary" type="button">Use my location</button>
@@ -165,7 +165,9 @@ footer a{color:inherit}
     const list = filtered();
     $('status').textContent = `${list.length} halal place${list.length === 1 ? '' : 's'}` +
       ($('city').value ? ` in ${$('city').value}` : ' in the Austin area') +
-      (origin ? `, nearest to ${originLabel === 'You are here' ? 'you' : originLabel} first` : '') +
+      (origin ? (originLabel === 'You are here' ? ', nearest to you first'
+        : originLabel.startsWith('ZIP ') ? `, measured from the center of ${originLabel} (the gold dot) — type your street address for exact distances`
+        : `, nearest to ${originLabel} first`) : '') +
       (geoPending ? ` · placing pins on map (${geoDone}/${places.length})…` : '');
     $('list').innerHTML = list.length ? list.map(p => `<div class="place" tabindex="0" data-id="${p.id}">${card(p)}</div>`).join('')
       : '<div class="place">No matches — try another word or area.</div>';
